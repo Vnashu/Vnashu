@@ -1,0 +1,133 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.16"
+    }
+  }
+
+  required_version = ">= 1.2.0"
+}
+
+provider "aws" {
+  region  = "us-east-1"
+  profile = "default"
+}
+
+resource "aws_vpc" "myvpc" {
+  cidr_block   = "10.0.0.0/24"
+
+}
+
+resource "aws_subnet" "pub-sub" {
+  vpc_id               = aws_vpc.myvpc.id
+  cidr_block           = "10.0.0.0/25"
+  availability_zone    = "us-east-1a"
+}
+
+resource "aws_subnet" "pvt-sub" {
+  vpc_id               = aws_vpc.myvpc.id
+  cidr_block           = "10.0.0.128/25"
+  availability_zone    = "us-east-1b"
+
+}
+
+resource "aws_internet_gateway" "my-igw" {
+  vpc_id       = aws_vpc.myvpc.id
+
+}
+
+
+resource "aws_eip" "nat-ip" {
+ vpc   = true
+
+}
+
+resource "aws_nat_gateway" "my-nat" {
+  allocation_id  = aws_eip.nat-ip.id
+  subnet_id      = aws_subnet.pub-sub.id
+
+}
+
+resource "aws_route_table" "pub-rt" {
+  vpc_id      = aws_vpc.myvpc.id
+
+
+  route {
+    cidr_block   = "0.0.0.0/0"
+    gateway_id   = aws_internet_gateway.my-igw.id
+  }
+
+}
+
+resource "aws_route_table_association" "pub-sub-rt-ass" {
+  subnet_id       = aws_subnet.pub-sub.id
+  route_table_id  = aws_route_table.pub-rt.id
+
+}
+
+resource "aws_route_table" "pri-rt" {
+  vpc_id  = aws_vpc.myvpc.id
+
+  route {
+    cidr_block      = "0.0.0.0/0"
+    nat_gateway_id  = aws_nat_gateway.my-nat.id
+
+  }
+
+}
+
+resource "aws_route_table_association" "pvt-sub-rt-ass" {
+  subnet_id         = aws_subnet.pvt-sub.id
+  route_table_id    = aws_route_table.pri-rt.id
+
+}
+
+resource "aws_security_group" "my-sg" {
+  name       = "my-sg"
+  vpc_id     = aws_vpc.myvpc.id
+
+  ingress {
+    from_port        = 80
+    to_port          = 80
+    protocol         = "tcp"
+    cidr_blocks      = ["0.0.0.0/0"]
+
+  }
+  ingress {
+    from_port        = 22
+    to_port          = 22
+    protocol         = "tcp"
+    cidr_blocks      = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port        = 0
+    to_port          = 0
+    protocol         = "-1"
+    cidr_blocks      = ["0.0.0.0/0"]
+
+  }
+}
+
+
+resource "aws_instance" "public" {
+  ami                         = "ami-06aa3f7caf3a30282"
+  instance_type               = "t2.micro"
+  key_name                    = "tt"
+  subnet_id                   = aws_subnet.pub-sub.id
+  security_groups             = [aws_security_group.my-sg.id]
+  associate_public_ip_address = true
+}
+
+
+resource "aws_instance" "private" {
+  ami                         = "ami-06aa3f7caf3a30282"
+  instance_type               = "t2.micro"
+  key_name                    = "tt"
+  subnet_id                   = aws_subnet.pvt-sub.id
+  security_groups             =[aws_security_group.my-sg.id]
+  associate_public_ip_address = false
+}
+
+
